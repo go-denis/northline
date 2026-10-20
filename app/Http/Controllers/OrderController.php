@@ -4,17 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Mail\OrderPlacedMail;
+use App\Jobs\SendOrderPlacedEmail;
+use App\Jobs\SyncOrderToCrm;
 use App\Models\Order;
-use App\Services\CrmSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Throwable;
 
 class OrderController extends Controller
 {
@@ -77,7 +74,7 @@ class OrderController extends Controller
         ]);
     }
 
-    public function store(Request $request, CrmSyncService $crm): JsonResponse
+    public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'customer_id' => ['required', 'integer', 'exists:customers,id'],
@@ -110,24 +107,15 @@ class OrderController extends Controller
                 'unit_price' => $item['unit_price'],
             ], $validated['items']));
 
+            $orderId = $order->id;
+
+            DB::afterCommit(function () use ($orderId): void {
+                SyncOrderToCrm::dispatch($orderId)->onQueue('crm');
+                SendOrderPlacedEmail::dispatch($orderId)->onQueue('emails');
+            });
+
             return $order;
         });
-
-        $order->load(['customer', 'items']);
-
-        $customer = $order->customer ?? throw new \RuntimeException('Order is missing its customer.');
-
-        Mail::to($customer->email)->send(new OrderPlacedMail($order));
-        $order->forceFill(['email_sent' => true])->save();
-
-        try {
-            $crm->push($order);
-        } catch (Throwable $exception) {
-            Log::warning('CRM sync failed', [
-                'order_id' => $order->id,
-                'message' => $exception->getMessage(),
-            ]);
-        }
 
         return response()->json([
             'data' => [

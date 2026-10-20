@@ -2,11 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SendOrderPlacedEmail;
+use App\Jobs\SyncOrderToCrm;
+use App\Mail\OrderPlacedMail;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\User;
+use App\Services\CrmSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class OrderDeskTest extends TestCase
@@ -251,8 +258,10 @@ class OrderDeskTest extends TestCase
             ->assertJsonValidationErrors(['status']);
     }
 
-    public function test_a_user_can_create_an_order_with_several_items(): void
+    public function test_a_user_can_create_an_order_with_several_items_and_queue_side_effects(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $customer = Customer::factory()->create();
 
@@ -272,8 +281,80 @@ class OrderDeskTest extends TestCase
         $this->assertSame($user->id, $order->created_by);
         $this->assertSame('new', $order->status);
         $this->assertSame('25.00', $order->total_amount);
-        $this->assertTrue($order->email_sent);
+        $this->assertFalse($order->email_sent);
         $this->assertSame(2, $order->items()->count());
+
+        Queue::assertPushed(SendOrderPlacedEmail::class, 1);
+        Queue::assertPushed(SendOrderPlacedEmail::class, function (SendOrderPlacedEmail $job) use ($order): bool {
+            return $job->orderId === $order->id && $job->queue === 'emails';
+        });
+
+        Queue::assertPushed(SyncOrderToCrm::class, 1);
+        Queue::assertPushed(SyncOrderToCrm::class, function (SyncOrderToCrm $job) use ($order): bool {
+            return $job->orderId === $order->id && $job->queue === 'crm';
+        });
+    }
+
+    public function test_email_job_success_is_independent_from_crm_job_failure(): void
+    {
+        Mail::fake();
+
+        $customer = Customer::factory()->create([
+            'email' => 'parts@westbridge-hydraulics.test',
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'email_sent' => false,
+        ]);
+
+        $sendEmailJob = new SendOrderPlacedEmail($order->id);
+        $sendEmailJob->handle();
+
+        $this->assertTrue($order->fresh()->email_sent);
+
+        $syncToCrmJob = new SyncOrderToCrm($order->id);
+
+        try {
+            $syncToCrmJob->handle(app(CrmSyncService::class));
+            $this->fail('Expected CRM sync to fail for Westbridge customer.');
+        } catch (RuntimeException) {
+            $this->assertTrue($order->fresh()->email_sent);
+        }
+    }
+
+    public function test_send_order_placed_email_job_marks_order_as_sent_after_successful_delivery(): void
+    {
+        Mail::fake();
+
+        $order = Order::factory()->create([
+            'email_sent' => false,
+        ]);
+
+        $job = new SendOrderPlacedEmail($order->id);
+        $job->handle();
+
+        Mail::assertSent(OrderPlacedMail::class, function (OrderPlacedMail $mail) use ($order): bool {
+            return $mail->order->id === $order->id;
+        });
+
+        $this->assertTrue($order->fresh()->email_sent);
+    }
+
+    public function test_sync_order_to_crm_job_surfaces_failures_for_retry_handling(): void
+    {
+        $customer = Customer::factory()->create([
+            'email' => 'parts@westbridge-hydraulics.test',
+        ]);
+
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+        ]);
+
+        $job = new SyncOrderToCrm($order->id);
+
+        $this->expectException(RuntimeException::class);
+        $job->handle(app(CrmSyncService::class));
     }
 
     public function test_creating_an_order_requires_line_items(): void

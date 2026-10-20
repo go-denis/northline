@@ -12,22 +12,38 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\Rule;
 use Throwable;
 
 class OrderController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $orders = Order::query()->latest();
+        $validated = $request->validate([
+            'status' => ['nullable', 'string', Rule::in(Order::STATUSES)],
+            'customer_email' => ['nullable', 'string', 'max:255'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
 
-        if ($request->filled('status')) {
-            $orders->where('status', (string) $request->string('status'));
+        $orders = Order::query()
+            ->with('customer')
+            ->withCount('items')
+            ->latest();
+
+        if (! empty($validated['status'])) {
+            $orders->where('status', $validated['status']);
         }
 
-        $orders = $orders->get();
+        if (! empty($validated['customer_email'])) {
+            $orders->whereHas('customer', function ($query) use ($validated): void {
+                $query->where('email', 'like', '%'.$validated['customer_email'].'%');
+            });
+        }
+
+        $paginator = $orders->paginate(15)->withQueryString();
 
         return response()->json([
-            'data' => $orders->map(function (Order $order) {
+            'data' => collect($paginator->items())->map(function (Order $order) {
                 $customer = $order->customer ?? throw new \RuntimeException('Order is missing its customer.');
 
                 return [
@@ -37,7 +53,7 @@ class OrderController extends Controller
                     'email_sent' => $order->email_sent,
                     'created_at' => $order->created_at?->toIso8601String(),
                     'created_by' => $order->created_by,
-                    'items_count' => $order->items->count(),
+                    'items_count' => $order->items_count,
                     'customer' => [
                         'id' => $customer->id,
                         'name' => $customer->name,
@@ -45,6 +61,18 @@ class OrderController extends Controller
                     ],
                 ];
             })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+            'links' => [
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
         ]);
     }
 

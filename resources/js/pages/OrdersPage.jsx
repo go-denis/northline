@@ -5,6 +5,7 @@ const statusOptions = [
     { value: 'new', label: 'New' },
     { value: 'processing', label: 'Processing' },
     { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
 ];
 
 function blankItem() {
@@ -29,6 +30,15 @@ export default function OrdersPage({ user, onLogout }) {
     const [loaded, setLoaded] = useState(false);
     const [listError, setListError] = useState('');
     const [reloadKey, setReloadKey] = useState(0);
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({
+        current_page: 1,
+        last_page: 1,
+        per_page: 15,
+        total: 0,
+        from: null,
+        to: null,
+    });
     const [customerId, setCustomerId] = useState('');
     const [items, setItems] = useState([blankItem()]);
     const [formError, setFormError] = useState('');
@@ -48,20 +58,32 @@ export default function OrdersPage({ user, onLogout }) {
                 params.status = status;
             }
 
+            if (email) {
+                params.customer_email = email;
+            }
+
+            params.page = page;
+
             window.axios.get('/api/orders', { params })
                 .then((response) => {
                     setOrders(response.data.data);
+                    setPagination(response.data.meta);
                     setListError('');
                     setLoaded(true);
                 })
-                .catch(() => setListError('Could not load orders.'));
+                .catch(() => {
+                    setListError('Could not load orders.');
+                    setOrders([]);
+                    setPagination({ current_page: 1, last_page: 1, total: 0, from: null, to: null });
+                    setLoaded(true);
+                });
         };
 
         load();
         const timer = window.setInterval(load, 4000);
 
         return () => window.clearInterval(timer);
-    }, [status, reloadKey]);
+    }, [status, email, page, reloadKey]);
 
     const updateItem = (index, field, value) => {
         setItems((current) => current.map((item, itemIndex) => {
@@ -139,7 +161,10 @@ export default function OrdersPage({ user, onLogout }) {
                             <span className="mb-1 block font-medium text-slate-700">Status</span>
                             <select
                                 value={status}
-                                onChange={(event) => setStatus(event.target.value)}
+                                onChange={(event) => {
+                                    setStatus(event.target.value);
+                                    setPage(1);
+                                }}
                                 className="rounded-md border border-slate-300 px-3 py-2"
                             >
                                 {statusOptions.map((option) => (
@@ -152,7 +177,10 @@ export default function OrdersPage({ user, onLogout }) {
                             <input
                                 type="email"
                                 value={email}
-                                onChange={(event) => setEmail(event.target.value)}
+                                onChange={(event) => {
+                                    setEmail(event.target.value);
+                                    setPage(1);
+                                }}
                                 placeholder="buyer@company.test"
                                 className="rounded-md border border-slate-300 px-3 py-2"
                             />
@@ -206,6 +234,35 @@ export default function OrdersPage({ user, onLogout }) {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm">
+                        <p className="text-slate-600">
+                            {pagination.total > 0
+                                ? `Showing ${pagination.from}-${pagination.to} of ${pagination.total}`
+                                : 'No results'}
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                                disabled={pagination.current_page <= 1}
+                                className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+                            >
+                                Previous
+                            </button>
+                            <span className="text-slate-600">
+                                Page {pagination.current_page} of {pagination.last_page}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setPage((current) => current + 1)}
+                                disabled={pagination.current_page >= pagination.last_page}
+                                className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+                            >
+                                Next
+                            </button>
+                        </div>
                     </div>
                 </section>
 

@@ -110,8 +110,8 @@ class OrderController extends Controller
             $orderId = $order->id;
 
             DB::afterCommit(function () use ($orderId): void {
-                SyncOrderToCrm::dispatch($orderId)->onQueue('crm');
-                SendOrderPlacedEmail::dispatch($orderId)->onQueue('emails');
+                SyncOrderToCrm::dispatch($orderId);
+                SendOrderPlacedEmail::dispatch($orderId);
             });
 
             return $order;

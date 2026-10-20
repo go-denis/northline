@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -137,6 +138,8 @@ class OrderController extends Controller
 
     public function destroy(Order $order): JsonResponse
     {
+        Gate::authorize('delete', $order);
+
         $order->delete();
 
         return response()->json([

@@ -87,6 +87,170 @@ class OrderDeskTest extends TestCase
             ->assertJsonPath('data.0.status', 'new');
     }
 
+    public function test_orders_can_be_filtered_by_customer_email(): void
+    {
+        $user = User::factory()->create();
+
+        $firstCustomer = Customer::factory()->create([
+            'email' => 'first@example.test',
+        ]);
+
+        $secondCustomer = Customer::factory()->create([
+            'email' => 'second@example.test',
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $firstCustomer->id,
+            'created_by' => $user->id,
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $secondCustomer->id,
+            'created_by' => $user->id,
+        ]);
+
+        $response = $this->actingAs($user)->getJson('/api/orders?customer_email=first@example.test');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.customer.email', 'first@example.test');
+    }
+
+    public function test_orders_can_be_filtered_by_partial_customer_email(): void
+    {
+        $user = User::factory()->create();
+
+        $firstCustomer = Customer::factory()->create([
+            'email' => 'first@example.test',
+        ]);
+
+        $secondCustomer = Customer::factory()->create([
+            'email' => 'second@other.test',
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $firstCustomer->id,
+            'created_by' => $user->id,
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $secondCustomer->id,
+            'created_by' => $user->id,
+        ]);
+
+        $response = $this->actingAs($user)->getJson('/api/orders?customer_email=example');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.customer.email', 'first@example.test');
+    }
+
+    public function test_orders_can_be_filtered_by_status_and_customer_email_together(): void
+    {
+        $user = User::factory()->create();
+        $customer = Customer::factory()->create([
+            'email' => 'filter@example.test',
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'new',
+            'created_by' => $user->id,
+        ]);
+
+        Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => 'completed',
+            'created_by' => $user->id,
+        ]);
+
+        $response = $this->actingAs($user)
+            ->getJson('/api/orders?status=completed&customer_email=filter@example.test');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.status', 'completed')
+            ->assertJsonPath('data.0.customer.email', 'filter@example.test');
+    }
+
+    public function test_orders_are_paginated(): void
+    {
+        $user = User::factory()->create();
+        $customer = Customer::factory()->create();
+
+        Order::factory()->count(16)->create([
+            'customer_id' => $customer->id,
+            'created_by' => $user->id,
+        ]);
+
+        $firstPageResponse = $this->actingAs($user)->getJson('/api/orders?page=1');
+
+        $firstPageResponse->assertOk()
+            ->assertJsonCount(15, 'data')
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.last_page', 2)
+            ->assertJsonPath('meta.total', 16)
+            ->assertJsonPath('meta.per_page', 15);
+
+        $secondPageResponse = $this->actingAs($user)->getJson('/api/orders?page=2');
+
+        $secondPageResponse->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.current_page', 2)
+            ->assertJsonPath('meta.last_page', 2);
+    }
+
+    public function test_orders_keep_filters_when_requesting_another_page(): void
+    {
+        $user = User::factory()->create();
+
+        $matchingCustomer = Customer::factory()->create([
+            'email' => 'buyer@example.test',
+        ]);
+
+        $otherCustomer = Customer::factory()->create([
+            'email' => 'other@northline.test',
+        ]);
+
+        Order::factory()->count(17)->create([
+            'customer_id' => $matchingCustomer->id,
+            'status' => 'new',
+            'created_by' => $user->id,
+        ]);
+
+        Order::factory()->count(5)->create([
+            'customer_id' => $otherCustomer->id,
+            'status' => 'new',
+            'created_by' => $user->id,
+        ]);
+
+        $pageTwoResponse = $this->actingAs($user)
+            ->getJson('/api/orders?status=new&customer_email=example&page=2');
+
+        $pageTwoResponse->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.current_page', 2)
+            ->assertJsonPath('meta.last_page', 2)
+            ->assertJsonPath('meta.total', 17);
+
+        $this->assertCount(2, $pageTwoResponse->json('data'));
+
+        foreach ($pageTwoResponse->json('data') as $order) {
+            $this->assertSame('new', $order['status']);
+            $this->assertStringContainsString('example', $order['customer']['email']);
+        }
+    }
+
+    public function test_orders_reject_unknown_status_filter(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->getJson('/api/orders?status=unknown')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['status']);
+    }
+
     public function test_a_user_can_create_an_order_with_several_items(): void
     {
         $user = User::factory()->create();

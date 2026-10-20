@@ -289,7 +289,7 @@ class OrderDeskTest extends TestCase
         $this->assertSame(0, Order::query()->count());
     }
 
-    public function test_a_user_can_delete_a_new_order(): void
+    public function test_a_user_can_delete_their_own_new_order(): void
     {
         $user = User::factory()->create();
         $order = Order::factory()->create([
@@ -302,5 +302,37 @@ class OrderDeskTest extends TestCase
             ->assertOk();
 
         $this->assertModelMissing($order);
+    }
+
+    public function test_a_user_cannot_delete_another_users_new_order(): void
+    {
+        $owner = User::factory()->create();
+        $actor = User::factory()->create();
+
+        $order = Order::factory()->create([
+            'status' => 'new',
+            'created_by' => $owner->id,
+        ]);
+
+        $this->actingAs($actor)
+            ->deleteJson('/api/orders/'.$order->id)
+            ->assertForbidden();
+
+        $this->assertModelExists($order);
+    }
+
+    public function test_a_user_cannot_delete_their_own_non_new_order(): void
+    {
+        $user = User::factory()->create();
+        $order = Order::factory()->create([
+            'status' => 'completed',
+            'created_by' => $user->id,
+        ]);
+
+        $this->actingAs($user)
+            ->deleteJson('/api/orders/'.$order->id)
+            ->assertForbidden();
+
+        $this->assertModelExists($order);
     }
 }

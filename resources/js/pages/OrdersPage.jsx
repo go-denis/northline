@@ -71,12 +71,7 @@ export default function OrdersPage({ user, onLogout }) {
                     setListError('');
                     setLoaded(true);
                 })
-                .catch(() => {
-                    setListError('Could not load orders.');
-                    setOrders([]);
-                    setPagination({ current_page: 1, last_page: 1, total: 0, from: null, to: null });
-                    setLoaded(true);
-                });
+                .catch(() => setListError('Could not load orders.'));
         };
 
         load();
@@ -132,6 +127,8 @@ export default function OrdersPage({ user, onLogout }) {
     const signOut = () => {
         window.axios.post('/logout').finally(() => onLogout());
     };
+
+    const canDeleteOrder = (order) => order.created_by === user.id && order.status === 'new';
 
     const draftTotal = items.reduce((sum, item) => {
         return sum + (Number(item.qty) || 0) * (Number(item.unit_price) || 0);
@@ -222,13 +219,15 @@ export default function OrdersPage({ user, onLogout }) {
                                         <td className="px-4 py-3">{order.email_sent ? 'Sent' : 'Pending'}</td>
                                         <td className="px-4 py-3">{order.created_by === user.id ? 'You' : 'Teammate'}</td>
                                         <td className="px-4 py-3 text-right">
-                                            <button
-                                                type="button"
-                                                onClick={() => removeOrder(order)}
-                                                className="text-red-700"
-                                            >
-                                                Delete
-                                            </button>
+                                            {canDeleteOrder(order) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeOrder(order)}
+                                                    className="text-red-700"
+                                                >
+                                                    Delete
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

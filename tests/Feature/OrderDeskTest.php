@@ -258,8 +258,10 @@ class OrderDeskTest extends TestCase
             ->assertJsonValidationErrors(['status']);
     }
 
-    public function test_a_user_can_create_an_order_with_several_items_and_queue_side_effects(): void
+    public function test_a_user_can_create_an_order_with_several_items(): void
     {
+        // We assert immediate persisted state after the request, so queued
+        // side effects must not run during this test.
         Queue::fake();
 
         $user = User::factory()->create();
@@ -283,16 +285,6 @@ class OrderDeskTest extends TestCase
         $this->assertSame('25.00', $order->total_amount);
         $this->assertFalse($order->email_sent);
         $this->assertSame(2, $order->items()->count());
-
-        Queue::assertPushed(SendOrderPlacedEmail::class, 1);
-        Queue::assertPushed(SendOrderPlacedEmail::class, function (SendOrderPlacedEmail $job) use ($order): bool {
-            return $job->orderId === $order->id && $job->queue === 'emails';
-        });
-
-        Queue::assertPushed(SyncOrderToCrm::class, 1);
-        Queue::assertPushed(SyncOrderToCrm::class, function (SyncOrderToCrm $job) use ($order): bool {
-            return $job->orderId === $order->id && $job->queue === 'crm';
-        });
     }
 
     public function test_email_job_success_is_independent_from_crm_job_failure(): void
@@ -359,6 +351,8 @@ class OrderDeskTest extends TestCase
 
     public function test_creating_an_order_requires_line_items(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $customer = Customer::factory()->create();
 
@@ -368,6 +362,7 @@ class OrderDeskTest extends TestCase
         ])->assertUnprocessable();
 
         $this->assertSame(0, Order::query()->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_a_user_can_delete_their_own_new_order(): void

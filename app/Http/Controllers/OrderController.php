@@ -109,9 +109,11 @@ class OrderController extends Controller
 
             $orderId = $order->id;
 
+            // Keep external side effects outside the transaction lifecycle.
+            // If an outer transaction rolls back, these callbacks are discarded.
             DB::afterCommit(function () use ($orderId): void {
-                SyncOrderToCrm::dispatch($orderId);
                 SendOrderPlacedEmail::dispatch($orderId);
+                SyncOrderToCrm::dispatch($orderId);
             });
 
             return $order;

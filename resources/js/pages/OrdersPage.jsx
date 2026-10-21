@@ -128,7 +128,8 @@ export default function OrdersPage({ user, onLogout }) {
         window.axios.post('/logout').finally(() => onLogout());
     };
 
-    const canDeleteOrder = (order) => order.created_by === user.id && order.status === 'new';
+    const canDeleteOrder = (order) =>
+        Number(order.created_by) === Number(user.id) && order.status === 'new';
 
     const draftTotal = items.reduce((sum, item) => {
         return sum + (Number(item.qty) || 0) * (Number(item.unit_price) || 0);
